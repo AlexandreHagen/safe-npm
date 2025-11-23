@@ -25,6 +25,18 @@ For example, if you specify `react@^18` and a malicious `react@18.5.0` was publi
 
 ## Installation
 
+### Install from npm (recommended)
+
+```bash
+# Install globally
+npm install -g @dendronhq/safe-npm
+
+# Now you can use it anywhere
+safe-npm install
+```
+
+### Build from source
+
 ```bash
 # Clone and build
 git clone <repository-url>
@@ -32,11 +44,8 @@ cd safe-npm
 npm install
 npm run build
 
-# Link the binary globally (optional)
+# Link the binary globally
 npm link
-
-# Now you can use it anywhere
-safe-npm install
 ```
 
 ## Basic usage
