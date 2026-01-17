@@ -99,6 +99,76 @@ describe("safe-npm CLI integration", () => {
       fixture.cleanup();
     }
   });
+
+  it("uses pnpm add when package-manager is pnpm", () => {
+    const fixture = createFixtureFile({
+      alpha: createPackage("alpha", {
+        "1.0.0": isoDaysAgo(200),
+        "1.1.0": isoDaysAgo(150)
+      })
+    });
+    const pnpm = createFakePackageManager("pnpm");
+
+    try {
+      const result = runCli(["install", "alpha", "--package-manager", "pnpm"], {
+        env: {
+          SAFE_NPM_FIXTURES: fixture.path,
+          PM_LOG_PATH: pnpm.logPath,
+          PATH: [pnpm.binDir, process.env.PATH ?? ""].join(path.delimiter)
+        }
+      });
+      expect(result.status).toBe(0);
+      const logLines = fs.readFileSync(pnpm.logPath, "utf8").trim().split("\n");
+      expect(logLines.length).toBe(1);
+      const entry = JSON.parse(logLines[0]);
+      expect(entry.argv[0]).toBe("add");
+      expect(entry.argv).toContain("alpha@1.1.0");
+      expect(entry.argv).toContain("--registry");
+      expect(entry.argv).toContain("https://registry.npmjs.org");
+    } finally {
+      fixture.cleanup();
+      pnpm.cleanup();
+    }
+  });
+
+  it("writes pnpm.overrides when using overrides strategy", () => {
+    const fixture = createFixtureFile({
+      alpha: createPackage("alpha", {
+        "2.0.0": isoDaysAgo(120)
+      })
+    });
+    const pnpm = createFakePackageManager("pnpm");
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "safe-npm-overrides-"));
+    fs.writeFileSync(
+      path.join(tempDir, "package.json"),
+      JSON.stringify({ name: "fixture", version: "1.0.0" }, null, 2)
+    );
+
+    try {
+      const result = runCli(["install", "alpha", "--strategy", "overrides", "--package-manager", "pnpm"], {
+        cwd: tempDir,
+        env: {
+          SAFE_NPM_FIXTURES: fixture.path,
+          PM_LOG_PATH: pnpm.logPath,
+          PATH: [pnpm.binDir, process.env.PATH ?? ""].join(path.delimiter)
+        }
+      });
+      expect(result.status).toBe(0);
+      const pkg = JSON.parse(fs.readFileSync(path.join(tempDir, "package.json"), "utf8")) as {
+        pnpm?: { overrides?: Record<string, string> };
+      };
+      expect(pkg.pnpm?.overrides?.alpha).toBe("2.0.0");
+      const logLines = fs.readFileSync(pnpm.logPath, "utf8").trim().split("\n");
+      expect(logLines.length).toBe(1);
+      const entry = JSON.parse(logLines[0]);
+      expect(entry.argv[0]).toBe("install");
+      expect(entry.argv).toContain("--registry");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      fixture.cleanup();
+      pnpm.cleanup();
+    }
+  });
 });
 
 function runCli(args: string[], options?: { cwd?: string; env?: Record<string, string | undefined> }) {
@@ -123,6 +193,29 @@ function createFixtureFile(packages: Record<string, RegistryPackage>) {
   return {
     path: filePath,
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true })
+  };
+}
+
+function createFakePackageManager(name: string) {
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), `safe-npm-${name}-`));
+  const logPath = path.join(binDir, `${name}.log`);
+  const scriptPath = path.join(binDir, name);
+  const script = `#!/usr/bin/env node
+const fs = require("fs");
+const logPath = process.env.PM_LOG_PATH;
+if (logPath) {
+  fs.appendFileSync(logPath, JSON.stringify({ argv: process.argv.slice(2) }) + "\\n");
+}
+process.exit(0);
+`;
+
+  fs.writeFileSync(scriptPath, script);
+  fs.chmodSync(scriptPath, 0o755);
+
+  return {
+    binDir,
+    logPath,
+    cleanup: () => fs.rmSync(binDir, { recursive: true, force: true })
   };
 }
 

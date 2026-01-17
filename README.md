@@ -1,6 +1,6 @@
 # safe-npm
 
-A security-focused npm installer that protects your projects from newly compromised packages.
+A security-focused npm/pnpm installer that protects your projects from newly compromised packages.
 
 ## Why does this exist?
 
@@ -19,7 +19,7 @@ When you run `safe-npm install`, it:
 2. Queries the npm registry to find all available versions
 3. Filters out versions published more recently than your minimum age threshold
 4. Selects the newest version that meets both your semver requirements AND age requirements
-5. Installs the safe versions using npm
+5. Installs the safe versions using npm or pnpm
 
 For example, if you specify `react@^18` and a malicious `react@18.5.0` was published yesterday, safe-npm will install the latest version that's at least 90 days old instead.
 
@@ -33,6 +33,9 @@ npm install -g @dendronhq/safe-npm
 
 # Now you can use it anywhere
 safe-npm install
+
+# pnpm users can call the alternate binary
+safe-pnpm install
 ```
 
 ### Build from source
@@ -58,6 +61,16 @@ safe-npm install
 
 # Or specify your own minimum age
 safe-npm install --min-age-days 120
+```
+
+### Use pnpm instead of npm
+
+```bash
+# Use pnpm explicitly
+safe-npm install --package-manager pnpm
+
+# Or use the safe-pnpm alias
+safe-pnpm install
 ```
 
 ### Install specific packages
@@ -128,11 +141,11 @@ Control which dependencies from `package.json` are processed.
 
 How safe-npm installs the resolved versions:
 
-**`direct`** - Directly installs the resolved versions using `npm install package@version`
+**`direct`** - Directly installs the resolved versions using `npm install package@version` or `pnpm add package@version`
 - Simple and straightforward
 - Good for one-time installs or scripts
 
-**`overrides`** - Writes resolved versions to `package.json` overrides field, then runs `npm install`
+**`overrides`** - Writes resolved versions to `package.json` overrides (npm) or `pnpm.overrides`, then runs `npm`/`pnpm install`
 - Enforces versions across your entire dependency tree (including transitive dependencies)
 - **Note:** This feature is currently disabled as it doesn't work correctly yet
 
@@ -157,6 +170,11 @@ Show what would be installed without making any changes.
 - Testing your configuration
 - Understanding what versions are available
 - Before making changes to production systems
+
+### `--package-manager <npm|pnpm>`
+**Default:** `npm` (or `pnpm` if you run `safe-pnpm`)
+
+Select which package manager to invoke for installation.
 
 ## Common workflows
 
@@ -250,7 +268,7 @@ Security is about trade-offs. safe-npm trades bleeding-edge updates for protecti
 ## Requirements
 
 - Node.js 18 or higher
-- npm (for the underlying installation)
+- npm or pnpm (for the underlying installation)
 
 ## License
 

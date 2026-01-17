@@ -4,7 +4,8 @@
   "description": "A security-focused npm installer that protects your projects from newly compromised packages",
   "type": "module",
   "bin": {
-    "safe-npm": "dist/cli.js"
+    "safe-npm": "dist/cli.js",
+    "safe-pnpm": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -17,6 +18,7 @@
   },
   "keywords": [
     "npm",
+    "pnpm",
     "security",
     "supply-chain",
     "package-manager",

@@ -9,6 +9,9 @@ interface PackageJson {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   overrides?: Record<string, string>;
+  pnpm?: {
+    overrides?: Record<string, string>;
+  };
 }
 
 interface Failure {
@@ -18,15 +21,19 @@ interface Failure {
 }
 
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
+type PackageManager = "npm" | "pnpm";
+
+const { cliName, defaultPackageManager } = detectCliDefaults();
 
 const program = new Command();
 
-program.name("safe-npm").description("Install npm dependencies with a minimum publish age");
+program.name(cliName).description("Install npm/pnpm dependencies with a minimum publish age");
 
 program
   .command("install [packages...]", { isDefault: true })
   .option("--min-age-days <n>", "minimum publish age in days", "90")
   .option("--registry <url>", "npm registry to query", DEFAULT_REGISTRY)
+  .option("--package-manager <manager>", "npm|pnpm package manager to use", defaultPackageManager)
   .option("--dry-run", "show planned versions without installing", false)
   .option("--strict", "exit with error when a dependency cannot be resolved", false)
   .option("--dev", "only target devDependencies from package.json", false)
@@ -41,6 +48,7 @@ program
     }
 
     const registry = options.registry || DEFAULT_REGISTRY;
+    const packageManager = normalizePackageManager(options.packageManager ?? defaultPackageManager);
     const cutOffMs = minAgeDays * 24 * 60 * 60 * 1000;
     const cutoffDate = new Date(Date.now() - cutOffMs);
     const ignoreSet = buildIgnoreSet(options.ignore);
@@ -114,7 +122,7 @@ program
     }
 
     const strategy = typeof options.strategy === "string" ? options.strategy.toLowerCase() : "direct";
-    await runStrategy(strategy, resolved, registry);
+    await runStrategy(strategy, resolved, registry, packageManager);
   });
 
 program.parseAsync(process.argv).catch(err => {
@@ -188,12 +196,25 @@ function parsePackageSpec(spec: string): { name: string; range: string } {
   return { name: spec, range: "latest" };
 }
 
-async function runStrategy(strategy: string, resolved: Map<string, string>, registry: string): Promise<void> {
+async function runStrategy(
+  strategy: string,
+  resolved: Map<string, string>,
+  registry: string,
+  packageManager: PackageManager
+): Promise<void> {
   if (strategy === "direct") {
-    const npmArgs = ["install", ...Array.from(resolved.entries()).map(([name, version]) => `${name}@${version}`)];
-    npmArgs.push("--registry", registry);
-    console.log(`\nRunning: npm ${npmArgs.join(" ")}`);
-    const result = spawnSync("npm", npmArgs, { stdio: "inherit" });
+    const packages = Array.from(resolved.entries()).map(([name, version]) => `${name}@${version}`);
+
+    if (packageManager === "npm") {
+      const npmArgs = ["install", ...packages, "--registry", registry];
+      console.log(`\nRunning: npm ${npmArgs.join(" ")}`);
+      const result = spawnSync("npm", npmArgs, { stdio: "inherit" });
+      process.exit(result.status ?? 1);
+    }
+
+    const pnpmArgs = ["add", ...packages, "--registry", registry];
+    console.log(`\nRunning: pnpm ${pnpmArgs.join(" ")}`);
+    const result = spawnSync("pnpm", pnpmArgs, { stdio: "inherit" });
     process.exit(result.status ?? 1);
   }
 
@@ -205,14 +226,54 @@ async function runStrategy(strategy: string, resolved: Map<string, string>, regi
     }
 
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as PackageJson;
-    pkg.overrides = { ...(pkg.overrides ?? {}), ...Object.fromEntries(resolved.entries()) };
+    const overrides = Object.fromEntries(resolved.entries());
+
+    if (packageManager === "npm") {
+      pkg.overrides = { ...(pkg.overrides ?? {}), ...overrides };
+      fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+      console.log("\nUpdated package.json overrides. Running npm install...");
+      const npmArgs = ["install", "--registry", registry];
+      const result = spawnSync("npm", npmArgs, { stdio: "inherit" });
+      process.exit(result.status ?? 1);
+    }
+
+    const pnpmConfig = isRecord(pkg.pnpm) ? pkg.pnpm : {};
+    const pnpmOverrides = isRecord(pnpmConfig.overrides) ? pnpmConfig.overrides : {};
+    pkg.pnpm = { ...pnpmConfig, overrides: { ...pnpmOverrides, ...overrides } };
     fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-    console.log("\nUpdated package.json overrides. Running npm install...");
-    const npmArgs = ["install", "--registry", registry];
-    const result = spawnSync("npm", npmArgs, { stdio: "inherit" });
+    console.log("\nUpdated package.json pnpm.overrides. Running pnpm install...");
+    const pnpmArgs = ["install", "--registry", registry];
+    const result = spawnSync("pnpm", pnpmArgs, { stdio: "inherit" });
     process.exit(result.status ?? 1);
   }
 
   console.error(`Unknown strategy: ${strategy}`);
   process.exit(1);
+}
+
+function normalizePackageManager(value: string | undefined): PackageManager {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "npm" || normalized === "pnpm") {
+    return normalized;
+  }
+
+  console.error(`Unsupported package manager: ${value}`);
+  process.exit(1);
+}
+
+function detectCliDefaults(): { cliName: string; defaultPackageManager: PackageManager } {
+  const invoked = path.basename(process.argv[1] ?? "");
+  if (invoked.includes("safe-pnpm")) {
+    return { cliName: "safe-pnpm", defaultPackageManager: "pnpm" };
+  }
+
+  if (invoked.includes("safe-npm")) {
+    return { cliName: "safe-npm", defaultPackageManager: "npm" };
+  }
+
+  return { cliName: "safe-npm", defaultPackageManager: "npm" };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
